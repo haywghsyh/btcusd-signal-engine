@@ -7,7 +7,6 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 app = Flask(__name__)
-print("DEBUG - OpenAIキー読み込み確認:", os.getenv("OPENAI_API_KEY"))
 
 # 環境変数からAPIキーを取得
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -40,7 +39,7 @@ def handle_message(event):
         {"role": "user", "content": user_text}
     ]
 
-        try:
+    try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=messages,
@@ -54,16 +53,7 @@ def handle_message(event):
         )
 
     except Exception as e:
-        print("OpenAIエラー内容:", str(e))  # ← ここがログに出ます！
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="診断に失敗しました。もう一度お試しください。")
-        )
-
-
-    except Exception as e:
-        # エラー内容をログに出力
-        print("OpenAIエラー内容:", str(e))
+        print("OpenAIエラー内容:", str(e))  # ← これがログに出力されます
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="診断に失敗しました。もう一度お試しください。")
