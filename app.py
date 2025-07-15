@@ -7,6 +7,7 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 app = Flask(__name__)
+print("DEBUG - OpenAIキー読み込み確認:", os.getenv("OPENAI_API_KEY"))
 
 # 環境変数からAPIキーを取得
 openai.api_key = os.getenv("OPENAI_API_KEY")
