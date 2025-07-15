@@ -53,12 +53,15 @@ def handle_message(event):
             TextSendMessage(text=reply_text)
         )
 
-    except Exception as e:
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="診断に失敗しました。もう一度お試しください。")
-        )
-        print("OpenAIエラー:", e)
+except Exception as e:
+    # ユーザーにはエラーメッセージを返信
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text="診断に失敗しました。もう一度お試しください。")
+    )
+    # Renderログにエラー内容を表示（ここが重要）
+    print("OpenAIエラー内容:", str(e))
+
 
 # ローカル開発用
 if __name__ == "__main__":
