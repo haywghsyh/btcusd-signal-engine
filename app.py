@@ -40,7 +40,7 @@ def handle_message(event):
         {"role": "user", "content": user_text}
     ]
 
-    try:
+        try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=messages,
@@ -52,6 +52,14 @@ def handle_message(event):
             event.reply_token,
             TextSendMessage(text=reply_text)
         )
+
+    except Exception as e:
+        print("OpenAIエラー内容:", str(e))  # ← ここがログに出ます！
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="診断に失敗しました。もう一度お試しください。")
+        )
+
 
     except Exception as e:
         # エラー内容をログに出力
