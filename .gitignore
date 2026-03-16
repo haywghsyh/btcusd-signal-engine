@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.db
+*.log
+.env
+signal_engine.log
