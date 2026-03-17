@@ -73,7 +73,13 @@ class MarketDataReceiver:
                 logger.warning(f"Ignoring symbol: {symbol}")
                 return False
 
-            timeframe = payload.get("timeframe", "").upper()
+            raw_tf = payload.get("timeframe", "")
+            # Map TradingView interval values to internal timeframe names
+            tf_map = {
+                "5": "M5", "15": "M15", "60": "H1", "240": "H4",
+                "M5": "M5", "M15": "M15", "H1": "H1", "H4": "H4",
+            }
+            timeframe = tf_map.get(str(raw_tf).upper(), str(raw_tf).upper())
             if timeframe not in self._buffers:
                 logger.warning(f"Ignoring timeframe: {timeframe}")
                 return False
