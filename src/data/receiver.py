@@ -103,6 +103,10 @@ class MarketDataReceiver:
 
             self._buffers[timeframe].add(candle)
 
+            # Auto-aggregate M5 candles into higher timeframes
+            if timeframe == "M5":
+                self._aggregate_higher_timeframes()
+
             # Update current price from latest close
             with self._lock:
                 self._current_price = {
@@ -121,6 +125,39 @@ class MarketDataReceiver:
         except (KeyError, ValueError, TypeError) as e:
             logger.error(f"Webhook payload error: {e}")
             return False
+
+    def _aggregate_higher_timeframes(self) -> None:
+        """Aggregate M5 candles into M15, H1, H4 automatically."""
+        m5_df = self._buffers["M5"].to_dataframe()
+        if m5_df is None or len(m5_df) < 3:
+            return
+
+        agg_map = {"M15": 3, "H1": 12, "H4": 48}  # number of M5 candles per period
+
+        for tf, n_bars in agg_map.items():
+            if tf not in self._buffers:
+                continue
+            if len(m5_df) < n_bars:
+                continue
+
+            # Group M5 candles into chunks of n_bars from the end
+            # Align to clean boundaries
+            total = len(m5_df)
+            # Work backwards from the latest candle
+            start = total % n_bars
+            for i in range(start, total, n_bars):
+                chunk = m5_df.iloc[i:i + n_bars]
+                if len(chunk) < n_bars:
+                    continue
+                agg_candle = {
+                    "time": chunk.iloc[0]["time"],
+                    "open": chunk.iloc[0]["open"],
+                    "high": chunk["high"].max(),
+                    "low": chunk["low"].min(),
+                    "close": chunk.iloc[-1]["close"],
+                    "volume": chunk["volume"].sum(),
+                }
+                self._buffers[tf].add(agg_candle)
 
     def get_all_dataframes(self) -> Optional[Dict[str, pd.DataFrame]]:
         """Get DataFrames for all timeframes. Returns None if any has insufficient data."""
