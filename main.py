@@ -6,6 +6,9 @@ and triggers the signal analysis pipeline.
 import logging
 import os
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, jsonify
 
 from src.config.settings import Settings
