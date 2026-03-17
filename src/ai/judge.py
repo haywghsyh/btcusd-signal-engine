@@ -1,5 +1,5 @@
 """
-AI Judge - Evaluates signal candidates using Claude API.
+AI Judge - Evaluates signal candidates using OpenAI ChatGPT API.
 AI does NOT make free-form trading decisions. It evaluates system-generated candidates.
 """
 import json
@@ -128,31 +128,33 @@ def evaluate_candidate(
     settings: Settings,
 ) -> Optional[Dict]:
     """
-    Send candidate to Claude API for evaluation.
+    Send candidate to OpenAI ChatGPT API for evaluation.
     Returns parsed JSON response or None on failure.
     """
     try:
-        import anthropic
+        from openai import OpenAI
     except ImportError:
-        logger.error("anthropic package not installed. Install with: pip install anthropic")
+        logger.error("openai package not installed. Install with: pip install openai")
         return None
 
-    if not settings.anthropic_api_key:
-        logger.error("ANTHROPIC_API_KEY not set")
+    if not settings.openai_api_key:
+        logger.error("OPENAI_API_KEY not set")
         return None
 
     user_prompt = build_prompt(candidate, featured_data)
 
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.create(
+        client = OpenAI(api_key=settings.openai_api_key)
+        response = client.chat.completions.create(
             model=settings.ai_model,
             max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
 
-        raw_text = response.content[0].text.strip()
+        raw_text = response.choices[0].message.content.strip()
         logger.info(f"AI raw response: {raw_text[:200]}")
 
         # Extract JSON from response

@@ -35,8 +35,8 @@ class Settings:
     })
 
     # AI
-    ai_model: str = "claude-sonnet-4-6"
-    anthropic_api_key: str = ""
+    ai_model: str = "gpt-4o-mini"
+    openai_api_key: str = ""
 
     # Risk
     max_sl_pips: float = 100.0
@@ -72,7 +72,7 @@ class Settings:
         env_map = {
             "TELEGRAM_TOKEN": "telegram_token",
             "TELEGRAM_CHAT_ID": "telegram_chat_id",
-            "ANTHROPIC_API_KEY": "anthropic_api_key",
+            "OPENAI_API_KEY": "openai_api_key",
             "DB_PATH": "db_path",
             "LOG_LEVEL": "log_level",
             "AI_MODEL": "ai_model",
