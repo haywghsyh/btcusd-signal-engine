@@ -157,6 +157,30 @@ def manual_analyze():
     return jsonify({"status": "ok", "signal": result}), 200
 
 
+@app.route("/positions", methods=["GET"])
+def open_positions():
+    """Get currently open positions."""
+    positions = engine.tracker.get_open_positions()
+    return jsonify({"open_positions": positions, "count": len(positions)}), 200
+
+
+@app.route("/performance", methods=["GET"])
+def performance():
+    """Get trading performance stats."""
+    stats = engine.get_performance()
+    return jsonify(stats), 200
+
+
+@app.route("/performance/telegram", methods=["POST"])
+def send_performance_telegram():
+    """Send performance dashboard to Telegram."""
+    stats = engine.get_performance()
+    if not stats or stats.get("total_trades", 0) == 0:
+        return jsonify({"status": "no_data", "message": "No closed trades yet"}), 200
+    sent = engine.notifier.send_dashboard(stats)
+    return jsonify({"status": "sent" if sent else "failed"}), 200
+
+
 if __name__ == "__main__":
     logger.info("Starting XAUUSD Signal Engine...")
     logger.info(f"Symbol: {settings.symbol}")

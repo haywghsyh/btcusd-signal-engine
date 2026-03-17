@@ -1,5 +1,5 @@
 """
-Signal Logger / Storage - SQLite database for signal history.
+Signal Logger / Storage - SQLite database for signal history and trade results.
 """
 import json
 import logging
@@ -31,14 +31,36 @@ CREATE TABLE IF NOT EXISTS signals (
     features_snapshot TEXT,
     ai_input TEXT,
     ai_output TEXT,
-    notification_sent INTEGER DEFAULT 0
+    notification_sent INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'open',
+    tp1_hit INTEGER DEFAULT 0,
+    tp2_hit INTEGER DEFAULT 0,
+    tp3_hit INTEGER DEFAULT 0,
+    sl_hit INTEGER DEFAULT 0,
+    exit_price REAL,
+    exit_time TEXT,
+    pnl_pips REAL,
+    result TEXT
 );
 """
 
 CREATE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_decision ON signals(decision);
+CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
 """
+
+MIGRATION_COLUMNS = [
+    ("status", "TEXT DEFAULT 'open'"),
+    ("tp1_hit", "INTEGER DEFAULT 0"),
+    ("tp2_hit", "INTEGER DEFAULT 0"),
+    ("tp3_hit", "INTEGER DEFAULT 0"),
+    ("sl_hit", "INTEGER DEFAULT 0"),
+    ("exit_price", "REAL"),
+    ("exit_time", "TEXT"),
+    ("pnl_pips", "REAL"),
+    ("result", "TEXT"),
+]
 
 
 class SignalDatabase:
@@ -56,6 +78,13 @@ class SignalDatabase:
                 sql = sql.strip()
                 if sql:
                     conn.execute(sql)
+            # Migrate existing tables: add new columns if missing
+            cursor = conn.execute("PRAGMA table_info(signals)")
+            existing_cols = {row[1] for row in cursor.fetchall()}
+            for col_name, col_def in MIGRATION_COLUMNS:
+                if col_name not in existing_cols:
+                    conn.execute(f"ALTER TABLE signals ADD COLUMN {col_name} {col_def}")
+                    logger.info(f"Added column: {col_name}")
             conn.commit()
             conn.close()
             logger.info(f"Database initialized: {self.db_path}")
@@ -137,6 +166,136 @@ class SignalDatabase:
         except sqlite3.Error as e:
             logger.error(f"Database read error: {e}")
             return None
+
+    def update_trade_event(self, signal_id: str, event_type: str,
+                           exit_price: float, pnl_pips: float) -> bool:
+        """Update a signal with TP/SL hit event."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            now = datetime.now(timezone.utc).isoformat()
+
+            if event_type == "SL_HIT":
+                conn.execute(
+                    """UPDATE signals SET sl_hit = 1, status = 'closed',
+                       exit_price = ?, exit_time = ?, pnl_pips = ?, result = 'LOSS'
+                       WHERE signal_id = ?""",
+                    (exit_price, now, pnl_pips, signal_id),
+                )
+            elif event_type == "TP1_HIT":
+                conn.execute(
+                    "UPDATE signals SET tp1_hit = 1 WHERE signal_id = ?",
+                    (signal_id,),
+                )
+            elif event_type == "TP2_HIT":
+                conn.execute(
+                    "UPDATE signals SET tp2_hit = 1 WHERE signal_id = ?",
+                    (signal_id,),
+                )
+            elif event_type == "TP3_HIT":
+                conn.execute(
+                    """UPDATE signals SET tp3_hit = 1, status = 'closed',
+                       exit_price = ?, exit_time = ?, pnl_pips = ?, result = 'WIN'
+                       WHERE signal_id = ?""",
+                    (exit_price, now, pnl_pips, signal_id),
+                )
+
+            conn.commit()
+            conn.close()
+            logger.info(f"Trade event updated: {signal_id} {event_type}")
+            return True
+        except sqlite3.Error as e:
+            logger.error(f"Trade event update error: {e}")
+            return False
+
+    def get_open_trades(self) -> List[Dict]:
+        """Get all open (active) trades."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """SELECT * FROM signals
+                   WHERE status = 'open' AND decision IN ('BUY', 'SELL')
+                   ORDER BY timestamp DESC""",
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+            return rows
+        except sqlite3.Error as e:
+            logger.error(f"Get open trades error: {e}")
+            return []
+
+    def get_performance_stats(self) -> Dict:
+        """Calculate trading performance statistics."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+
+            # All closed trades
+            cursor = conn.execute(
+                """SELECT * FROM signals
+                   WHERE status = 'closed' AND decision IN ('BUY', 'SELL')
+                   ORDER BY exit_time DESC""",
+            )
+            trades = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+            if not trades:
+                return {
+                    "total_trades": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "win_rate": 0.0,
+                    "total_pnl_pips": 0.0,
+                    "avg_win_pips": 0.0,
+                    "avg_loss_pips": 0.0,
+                    "best_trade_pips": 0.0,
+                    "worst_trade_pips": 0.0,
+                    "current_streak": 0,
+                    "tp1_hit_rate": 0.0,
+                    "tp2_hit_rate": 0.0,
+                    "tp3_hit_rate": 0.0,
+                }
+
+            total = len(trades)
+            wins = [t for t in trades if t["result"] == "WIN"]
+            losses = [t for t in trades if t["result"] == "LOSS"]
+            win_pnls = [t["pnl_pips"] for t in wins if t["pnl_pips"] is not None]
+            loss_pnls = [t["pnl_pips"] for t in losses if t["pnl_pips"] is not None]
+            all_pnls = [t["pnl_pips"] for t in trades if t["pnl_pips"] is not None]
+
+            # Current streak
+            streak = 0
+            if trades:
+                streak_result = trades[0].get("result")
+                for t in trades:
+                    if t.get("result") == streak_result:
+                        streak += 1 if streak_result == "WIN" else -1
+                    else:
+                        break
+
+            # TP hit rates (across all closed trades)
+            tp1_hits = sum(1 for t in trades if t.get("tp1_hit"))
+            tp2_hits = sum(1 for t in trades if t.get("tp2_hit"))
+            tp3_hits = sum(1 for t in trades if t.get("tp3_hit"))
+
+            return {
+                "total_trades": total,
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate": round(len(wins) / total * 100, 1) if total else 0.0,
+                "total_pnl_pips": round(sum(all_pnls), 1),
+                "avg_win_pips": round(sum(win_pnls) / len(win_pnls), 1) if win_pnls else 0.0,
+                "avg_loss_pips": round(sum(loss_pnls) / len(loss_pnls), 1) if loss_pnls else 0.0,
+                "best_trade_pips": round(max(all_pnls), 1) if all_pnls else 0.0,
+                "worst_trade_pips": round(min(all_pnls), 1) if all_pnls else 0.0,
+                "current_streak": streak,
+                "tp1_hit_rate": round(tp1_hits / total * 100, 1) if total else 0.0,
+                "tp2_hit_rate": round(tp2_hits / total * 100, 1) if total else 0.0,
+                "tp3_hit_rate": round(tp3_hits / total * 100, 1) if total else 0.0,
+            }
+        except sqlite3.Error as e:
+            logger.error(f"Performance stats error: {e}")
+            return {}
 
     def is_duplicate(self, direction: str, price: float,
                      cooldown_seconds: int) -> bool:

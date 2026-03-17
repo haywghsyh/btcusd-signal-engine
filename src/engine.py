@@ -15,6 +15,7 @@ from src.ai.judge import evaluate_candidate
 from src.risk.filter import validate_signal, enrich_signal
 from src.notifier.telegram import TelegramNotifier
 from src.storage.database import SignalDatabase
+from src.tracker.position import PositionTracker
 from src.utils.time_utils import now_jst
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,22 @@ class SignalEngine:
         self.receiver = MarketDataReceiver(settings)
         self.notifier = TelegramNotifier(settings)
         self.db = SignalDatabase(settings)
+        self.tracker = PositionTracker()
+        self._restore_open_positions()
 
     def process_webhook(self, payload: Dict) -> bool:
         """Process a TradingView webhook and potentially trigger signal analysis."""
-        return self.receiver.process_webhook(payload)
+        success = self.receiver.process_webhook(payload)
+
+        # Check open positions against new price data
+        if success and payload.get("timeframe", "").upper() == "M5":
+            high = float(payload.get("high", 0))
+            low = float(payload.get("low", 0))
+            close = float(payload.get("close", 0))
+            if high > 0 and low > 0:
+                self._check_positions(high, low, close)
+
+        return success
 
     def run_analysis(self) -> Optional[Dict]:
         """
@@ -138,11 +151,15 @@ class SignalEngine:
             notification_sent = self.notifier.send_signal(ai_output)
 
         # Step 9: Save to database
-        self.db.save_signal(
+        signal_id = self.db.save_signal(
             ai_output, market_context=states,
             features=self._collect_features_snapshot(featured_data),
             notification_sent=notification_sent,
         )
+
+        # Step 10: Register position for tracking
+        if decision in ("BUY", "SELL") and signal_id:
+            self.tracker.open_position(signal_id, ai_output)
 
         logger.info(
             f"Signal pipeline complete: {decision} "
@@ -160,6 +177,53 @@ class SignalEngine:
             "time_jst": jst_now.isoformat(),
             "recent_signals": len(self.db.get_recent_signals(5)),
         }
+
+    def _check_positions(self, high: float, low: float, close: float):
+        """Check open positions against price and send notifications."""
+        events = self.tracker.check_price(high, low, close)
+        for event in events:
+            event_type = event["event_type"]
+            signal_id = event["signal_id"]
+
+            # Update database
+            self.db.update_trade_event(
+                signal_id, event_type,
+                event["exit_price"], event["pnl_pips"],
+            )
+
+            # Send Telegram notification
+            if event_type == "SL_HIT":
+                self.notifier.send_sl_hit(event)
+            elif event_type in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
+                self.notifier.send_tp_hit(event)
+
+    def _restore_open_positions(self):
+        """Restore open positions from database on startup."""
+        open_trades = self.db.get_open_trades()
+        for trade in open_trades:
+            signal_id = trade["signal_id"]
+            signal = {
+                "decision": trade["decision"],
+                "current_price": trade["entry_price"],
+                "sl": trade["sl"],
+                "tp1": trade["tp1"],
+                "tp2": trade["tp2"],
+                "tp3": trade["tp3"],
+                "confidence": trade.get("confidence", 0),
+            }
+            self.tracker.open_position(signal_id, signal)
+            # Restore TP hit state
+            pos = self.tracker._open_positions.get(signal_id)
+            if pos:
+                pos["tp1_hit"] = bool(trade.get("tp1_hit"))
+                pos["tp2_hit"] = bool(trade.get("tp2_hit"))
+                pos["tp3_hit"] = bool(trade.get("tp3_hit"))
+        if open_trades:
+            logger.info(f"Restored {len(open_trades)} open positions from database")
+
+    def get_performance(self) -> Dict:
+        """Get trading performance statistics."""
+        return self.db.get_performance_stats()
 
     def _collect_features_snapshot(self, featured_data: Dict) -> Dict:
         """Collect latest features from all timeframes for logging."""
