@@ -84,13 +84,8 @@ class MarketDataReceiver:
                 logger.warning(f"Ignoring timeframe: {timeframe}")
                 return False
 
-            ts_raw = payload.get("timestamp")
-            if isinstance(ts_raw, str):
-                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-            elif isinstance(ts_raw, (int, float)):
-                ts = datetime.fromtimestamp(ts_raw, tz=timezone.utc)
-            else:
-                ts = datetime.now(timezone.utc)
+            ts_raw = payload.get("timestamp") or payload.get("time")
+            ts = self._parse_timestamp(ts_raw)
 
             candle = {
                 "time": ts,
@@ -125,6 +120,42 @@ class MarketDataReceiver:
         except (KeyError, ValueError, TypeError) as e:
             logger.error(f"Webhook payload error: {e}")
             return False
+
+    @staticmethod
+    def _parse_timestamp(ts_raw) -> datetime:
+        """Parse timestamp from various formats TradingView may send."""
+        if ts_raw is None:
+            return datetime.now(timezone.utc)
+
+        # If already a number (Unix timestamp)
+        if isinstance(ts_raw, (int, float)):
+            return datetime.fromtimestamp(ts_raw, tz=timezone.utc)
+
+        ts_str = str(ts_raw).strip()
+
+        # Try as Unix timestamp string (e.g. "1710734400")
+        try:
+            val = float(ts_str)
+            return datetime.fromtimestamp(val, tz=timezone.utc)
+        except ValueError:
+            pass
+
+        # Try ISO format (e.g. "2025-01-01T00:00:00Z")
+        try:
+            return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+        # Try common date formats
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M:%S"):
+            try:
+                dt = datetime.strptime(ts_str, fmt)
+                return dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+
+        logger.warning(f"Could not parse timestamp '{ts_str}', using current time")
+        return datetime.now(timezone.utc)
 
     def _aggregate_higher_timeframes(self) -> None:
         """Aggregate M5 candles into M15, H1, H4 automatically."""

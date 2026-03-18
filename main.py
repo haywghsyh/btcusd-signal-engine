@@ -47,6 +47,7 @@ def tradingview_webhook():
             return jsonify({"error": "Invalid JSON"}), 400
 
         logger.info(f"Webhook received: {payload.get('timeframe', '?')} candle")
+        logger.debug(f"Webhook payload: {payload}")
 
         # Process the candle data
         success = engine.process_webhook(payload)
@@ -105,16 +106,10 @@ def batch_webhook():
         if not timeframe or not candles:
             return jsonify({"error": "Missing timeframe or candles"}), 400
 
-        from datetime import datetime, timezone
         loaded = 0
         for c in candles:
-            ts_raw = c.get("timestamp")
-            if isinstance(ts_raw, str):
-                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-            elif isinstance(ts_raw, (int, float)):
-                ts = datetime.fromtimestamp(ts_raw, tz=timezone.utc)
-            else:
-                ts = datetime.now(timezone.utc)
+            ts_raw = c.get("timestamp") or c.get("time")
+            ts = engine.receiver._parse_timestamp(ts_raw)
 
             candle = {
                 "time": ts,
