@@ -12,6 +12,7 @@ load_dotenv()
 from flask import Flask, request, jsonify
 
 from src.config.settings import Settings
+from src.data.historical import load_historical_data
 from src.engine import SignalEngine
 from src.utils.logger import setup_logger
 
@@ -21,6 +22,23 @@ setup_logger(settings)
 logger = logging.getLogger(__name__)
 
 engine = SignalEngine(settings)
+
+# Load historical data on startup (works with both direct run and gunicorn)
+def warmup_historical_data():
+    """Load historical data on startup so signals can be generated immediately."""
+    logger.info("Loading historical XAUUSD data...")
+    try:
+        loaded = load_historical_data(engine.receiver, settings.timeframes)
+        if loaded:
+            status = engine.receiver.get_status()
+            logger.info(f"Buffer status after warmup: {status}")
+        else:
+            logger.warning("Historical data warmup returned no data - signals will be delayed")
+    except Exception as e:
+        logger.error(f"Historical data warmup failed: {e}", exc_info=True)
+        logger.warning("Continuing without historical data - signals will be delayed")
+
+warmup_historical_data()
 
 app = Flask(__name__)
 
