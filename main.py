@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 engine = SignalEngine(settings)
 
 # Analysis interval in seconds (default: 30 minutes)
-ANALYSIS_INTERVAL = int(os.getenv("ANALYSIS_INTERVAL_SECONDS", "1800"))
+ANALYSIS_INTERVAL = int(os.getenv("ANALYSIS_INTERVAL_SECONDS", "300"))
 
 
 def warmup_historical_data():
