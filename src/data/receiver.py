@@ -127,17 +127,23 @@ class MarketDataReceiver:
         if ts_raw is None:
             return datetime.now(timezone.utc)
 
-        # If already a number (Unix timestamp)
+        # If already a number (Unix timestamp in seconds or milliseconds)
         if isinstance(ts_raw, (int, float)):
-            return datetime.fromtimestamp(ts_raw, tz=timezone.utc)
+            val = ts_raw
+            if val > 1e12:
+                val = val / 1000.0
+            return datetime.fromtimestamp(val, tz=timezone.utc)
 
         ts_str = str(ts_raw).strip()
 
-        # Try as Unix timestamp string (e.g. "1710734400")
+        # Try as Unix timestamp string (seconds or milliseconds)
         try:
             val = float(ts_str)
+            # Millisecond timestamps (13+ digits) need to be converted to seconds
+            if val > 1e12:
+                val = val / 1000.0
             return datetime.fromtimestamp(val, tz=timezone.utc)
-        except ValueError:
+        except (ValueError, OSError, OverflowError):
             pass
 
         # Try ISO format (e.g. "2025-01-01T00:00:00Z")
