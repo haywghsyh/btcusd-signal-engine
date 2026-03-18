@@ -1,153 +1,190 @@
 """
-AI Judge - Evaluates signal candidates using OpenAI ChatGPT API.
-AI does NOT make free-form trading decisions. It evaluates system-generated candidates.
+AI Judge - ChatGPT freely analyzes XAUUSD market data and decides entries.
+No pre-filtered candidates. AI has full autonomy to decide BUY/SELL/NO_TRADE.
 """
 import json
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from src.config.settings import Settings
-from src.features.engine import get_latest_features
-from src.signals.generator import SignalCandidate
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an expert XAUUSD trading signal evaluator.
-You evaluate pre-generated signal candidates - you do NOT create trading strategies from scratch.
+SYSTEM_PROMPT = """あなたはXAUUSD（ゴールド）専門のプロスキャルパーです。
+市場データを分析し、自分の判断でエントリーシグナルを出してください。
 
-Your role:
-1. Evaluate the candidate signal (BUY or SELL)
-2. Determine SL, TP1, TP2, TP3 based on market structure
-3. Assess confidence (0-100)
-4. Provide invalidation condition
-5. Give brief reasoning
+【トレードスタイル】
+- スキャルピングのみ（保有時間: 数分〜最大1時間程度）
+- デイトレードやスイングトレードは禁止
+- SLは狭く（5〜30pips目安）、TPも近めに設定
+- 1 pip = 0.10 USD（XAUUSD）
 
-Rules for SL/TP:
-- SL must be based on market structure (swing highs/lows, ATR)
-- SL must be within 100 pips (1 pip = 0.10 USD for XAUUSD)
-- TP1: conservative/safe target
-- TP2: standard target
-- TP3: extended target, must achieve RR >= 1.0 vs SL
-- For BUY: SL < Entry < TP1 < TP2 < TP3
-- For SELL: TP3 < TP2 < TP1 < Entry < SL
+【重要な方針】
+- 勝率を最優先で意識すること（目標: 65%以上）
+- 無理にエントリーしない。確信がある時だけエントリーする
+- 1日3回程度のシグナルが理想（義務ではない）
+- エントリー理由を明確に説明すること
+- チャンスがなければNO_TRADEで構わない
 
-If the setup is not convincing, return NO_TRADE.
+【分析のポイント】
+- 短期の値動き（M5, M15）を重視
+- EMA, RSI, ATRなどのテクニカル指標を参考に
+- サポート/レジスタンスレベルを意識
+- ローソク足のパターンや勢いを見る
+- H1, H4はトレンドの方向確認に使用
 
-You MUST respond with valid JSON only, no other text."""
+【SL/TPルール】
+- BUYの場合: SL < Entry < TP1 < TP2 < TP3
+- SELLの場合: TP3 < TP2 < TP1 < Entry < SL
+- SLは市場構造に基づいて設定（直近の安値/高値）
+- TP1: 堅実な利確（RR 1:1程度）
+- TP2: 標準的な利確
+- TP3: 伸ばせる場合の利確
 
-USER_PROMPT_TEMPLATE = """Evaluate this {direction} signal candidate for XAUUSD.
+必ず有効なJSONのみで返答してください。"""
 
-Current Price: {current_price}
+USER_PROMPT_TEMPLATE = """以下のXAUUSD市場データを分析し、スキャルピングエントリーすべきか判断してください。
 
-Market States:
-{market_states}
+【現在価格】{current_price}
 
-Key Levels:
-- Swing High: {swing_high}
-- Swing Low: {swing_low}
-- ATR (M15): {atr}
+【M5（5分足）直近データ】
+{m5_summary}
 
-Features Summary:
-H4: {h4_features}
-H1: {h1_features}
-M15: {m15_features}
-M5: {m5_features}
+【M15（15分足）直近データ】
+{m15_summary}
 
-Candidate Reason: {reason}
+【H1（1時間足）コンテキスト】
+{h1_summary}
 
-Respond with JSON:
-For BUY/SELL:
+【H4（4時間足）トレンド】
+{h4_summary}
+
+【本日のシグナル状況】
+- 発行済みシグナル数: {signals_today}
+- 直近の結果: {recent_results}
+
+エントリーする場合:
 {{
   "symbol": "XAUUSD",
-  "decision": "BUY" or "SELL" or "NO_TRADE",
+  "decision": "BUY" or "SELL",
   "entry_type": "MARKET",
-  "current_price": <number>,
-  "sl": <number>,
-  "tp1": <number>,
-  "tp2": <number>,
-  "tp3": <number>,
-  "risk_reward_tp3": <number>,
+  "current_price": <現在価格>,
+  "sl": <ストップロス>,
+  "tp1": <利確1>,
+  "tp2": <利確2>,
+  "tp3": <利確3>,
+  "risk_reward_tp3": <リスクリワード比>,
   "confidence": <0-100>,
-  "invalidate_if": "<condition>",
-  "reason": "<brief reason>"
+  "invalidate_if": "<無効条件>",
+  "reason": "<エントリー理由を日本語で簡潔に>"
 }}
 
-For NO_TRADE:
+見送る場合:
 {{
   "symbol": "XAUUSD",
   "decision": "NO_TRADE",
   "confidence": <0-100>,
-  "reason": "<why no trade>"
+  "reason": "<見送り理由を日本語で簡潔に>"
 }}"""
 
 
-def _extract_feature_summary(features: Dict) -> str:
-    """Create a concise feature summary for the AI prompt."""
-    keys = ["close", "ema20", "ema50", "ema200", "atr", "rsi",
-            "swing_high", "swing_low", "body_size", "volatility",
-            "dist_ema20", "dist_ema50"]
+def _format_candle_summary(features: Dict, num_candles: int = 20) -> str:
+    """Format recent candle data into a readable summary for AI."""
+    if not features:
+        return "データなし"
+
     parts = []
-    for k in keys:
-        v = features.get(k)
+
+    # Latest values
+    latest_keys = [
+        ("close", "現在値"), ("ema20", "EMA20"), ("ema50", "EMA50"),
+        ("ema200", "EMA200"), ("rsi", "RSI"), ("atr", "ATR"),
+        ("swing_high", "直近高値"), ("swing_low", "直近安値"),
+        ("body_size", "実体サイズ"), ("volatility", "ボラティリティ%"),
+    ]
+
+    for key, label in latest_keys:
+        v = features.get(key)
         if v is not None:
             if isinstance(v, float):
-                parts.append(f"{k}={v:.2f}")
+                parts.append(f"{label}: {v:.2f}")
             else:
-                parts.append(f"{k}={v}")
-    return ", ".join(parts) if parts else "N/A"
+                parts.append(f"{label}: {v}")
+
+    # EMA alignment
+    if features.get("ema_bullish_aligned"):
+        parts.append("EMA配列: 上昇トレンド（20>50>200）")
+    elif features.get("ema_bearish_aligned"):
+        parts.append("EMA配列: 下降トレンド（20<50<200）")
+    else:
+        parts.append("EMA配列: 混在")
+
+    # Candle direction
+    consec = features.get("consecutive_direction", 0)
+    if consec > 0:
+        parts.append(f"連続陽線: {int(abs(consec))}本")
+    elif consec < 0:
+        parts.append(f"連続陰線: {int(abs(consec))}本")
+
+    return "\n".join(parts)
 
 
-def build_prompt(candidate: SignalCandidate,
-                 featured_data: Dict) -> str:
-    """Build the user prompt for AI evaluation."""
-    h4_f = get_latest_features(featured_data.get("H4"))
-    h1_f = get_latest_features(featured_data.get("H1"))
-    m15_f = get_latest_features(featured_data.get("M15"))
-    m5_f = get_latest_features(featured_data.get("M5"))
+def build_free_analysis_prompt(
+    featured_data: Dict,
+    current_price: float,
+    signals_today: int = 0,
+    recent_results: str = "まだなし",
+) -> str:
+    """Build prompt for free AI analysis (no pre-filtered candidate)."""
+    from src.features.engine import get_latest_features
 
-    states_str = "\n".join(f"  {k}: {v}" for k, v in candidate.market_states.items())
+    m5_features = get_latest_features(featured_data.get("M5"))
+    m15_features = get_latest_features(featured_data.get("M15"))
+    h1_features = get_latest_features(featured_data.get("H1"))
+    h4_features = get_latest_features(featured_data.get("H4"))
 
     return USER_PROMPT_TEMPLATE.format(
-        direction=candidate.direction,
-        current_price=f"{candidate.current_price:.2f}",
-        market_states=states_str,
-        swing_high=f"{candidate.swing_high:.2f}",
-        swing_low=f"{candidate.swing_low:.2f}",
-        atr=f"{candidate.atr:.2f}",
-        h4_features=_extract_feature_summary(h4_f),
-        h1_features=_extract_feature_summary(h1_f),
-        m15_features=_extract_feature_summary(m15_f),
-        m5_features=_extract_feature_summary(m5_f),
-        reason=candidate.reason,
+        current_price=f"{current_price:.2f}",
+        m5_summary=_format_candle_summary(m5_features),
+        m15_summary=_format_candle_summary(m15_features),
+        h1_summary=_format_candle_summary(h1_features),
+        h4_summary=_format_candle_summary(h4_features),
+        signals_today=signals_today,
+        recent_results=recent_results,
     )
 
 
-def evaluate_candidate(
-    candidate: SignalCandidate,
+def analyze_market(
     featured_data: Dict,
+    current_price: float,
     settings: Settings,
+    signals_today: int = 0,
+    recent_results: str = "まだなし",
 ) -> Optional[Dict]:
     """
-    Send candidate to OpenAI ChatGPT API for evaluation.
-    Returns parsed JSON response or None on failure.
+    Let ChatGPT freely analyze market data and decide entry.
+    No pre-filtering - AI has full autonomy.
     """
     try:
         from openai import OpenAI
     except ImportError:
-        logger.error("openai package not installed. Install with: pip install openai")
+        logger.error("openai package not installed")
         return None
 
     if not settings.openai_api_key:
         logger.error("OPENAI_API_KEY not set")
         return None
 
-    user_prompt = build_prompt(candidate, featured_data)
+    user_prompt = build_free_analysis_prompt(
+        featured_data, current_price, signals_today, recent_results
+    )
 
     try:
         client = OpenAI(api_key=settings.openai_api_key)
         response = client.chat.completions.create(
             model=settings.ai_model,
             max_tokens=1024,
+            temperature=0.3,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
@@ -155,9 +192,8 @@ def evaluate_candidate(
         )
 
         raw_text = response.choices[0].message.content.strip()
-        logger.info(f"AI raw response: {raw_text[:200]}")
+        logger.info(f"AI raw response: {raw_text[:300]}")
 
-        # Extract JSON from response
         ai_output = _parse_ai_response(raw_text)
         if ai_output is None:
             logger.error("Failed to parse AI response as JSON")
@@ -170,7 +206,7 @@ def evaluate_candidate(
         return ai_output
 
     except Exception as e:
-        logger.error(f"AI evaluation error: {e}")
+        logger.error(f"AI analysis error: {e}")
         return None
 
 

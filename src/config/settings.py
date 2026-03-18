@@ -31,20 +31,20 @@ class Settings:
     timeframes: List[str] = field(default_factory=lambda: ["H4", "H1", "M15", "M5"])
 
     min_candles: Dict[str, int] = field(default_factory=lambda: {
-        "H4": 300, "H1": 500, "M15": 1000, "M5": 1500,
+        "H4": 50, "H1": 50, "M15": 50, "M5": 50,
     })
 
     # AI
     ai_model: str = "gpt-4o-mini"
     openai_api_key: str = ""
 
-    # Risk
-    max_sl_pips: float = 100.0
-    min_rr: float = 1.0
-    spread_threshold_pips: float = 5.0
+    # Risk (relaxed - AI decides freely, only sanity checks)
+    max_sl_pips: float = 50.0
+    min_rr: float = 0.5
+    spread_threshold_pips: float = 10.0
 
-    # Cooldown
-    signal_cooldown_seconds: int = 900
+    # Cooldown (shorter for scalping)
+    signal_cooldown_seconds: int = 600
 
     # Sessions (JST)
     session_times: List[SessionTime] = field(default_factory=lambda: [

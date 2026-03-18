@@ -1,5 +1,6 @@
 """
-Risk Filter - Validates AI output against risk rules before notification.
+Risk Filter - Light validation of AI output.
+Only checks that numbers make sense. Does NOT override AI's trading decisions.
 """
 import logging
 from typing import Dict, Optional, Tuple
@@ -12,12 +13,11 @@ logger = logging.getLogger(__name__)
 def validate_signal(ai_output: Dict, settings: Settings,
                     spread: float = 0.0) -> Tuple[bool, Optional[str]]:
     """
-    Validate AI signal output against all risk rules.
-    Returns (is_valid, rejection_reason).
+    Light validation - only check that the numbers are valid.
+    AI has full autonomy on entry decisions.
     """
     decision = ai_output.get("decision", "").upper()
 
-    # NO_TRADE is always valid (just won't notify)
     if decision == "NO_TRADE":
         return True, None
 
@@ -45,49 +45,27 @@ def validate_signal(ai_output: Dict, settings: Settings,
         if val != val or val == float("inf") or val == float("-inf"):
             return False, f"Invalid value for {name}: {val}"
 
-    # SL width check
+    # SL width check (relaxed for scalping: max 50 pips)
     sl_pips = price_to_pips(price - sl)
-    if sl_pips > settings.max_sl_pips:
-        return False, f"SL too wide: {sl_pips:.1f} pips > {settings.max_sl_pips} max"
+    if sl_pips > 50:
+        return False, f"SL too wide for scalping: {sl_pips:.1f} pips > 50 max"
 
-    if sl_pips < 1.0:
+    if sl_pips < 0.5:
         return False, f"SL too tight: {sl_pips:.1f} pips"
 
     # Order validation
     if decision == "BUY":
-        if not (sl < price < tp1 < tp2 < tp3):
+        if not (sl < price < tp1):
             return False, (
-                f"BUY order invalid: SL({sl:.1f}) < Entry({price:.1f}) < "
-                f"TP1({tp1:.1f}) < TP2({tp2:.1f}) < TP3({tp3:.1f})"
+                f"BUY order invalid: SL({sl:.1f}) < Entry({price:.1f}) < TP1({tp1:.1f})"
             )
     else:  # SELL
-        if not (tp3 < tp2 < tp1 < price < sl):
+        if not (tp1 < price < sl):
             return False, (
-                f"SELL order invalid: TP3({tp3:.1f}) < TP2({tp2:.1f}) < "
-                f"TP1({tp1:.1f}) < Entry({price:.1f}) < SL({sl:.1f})"
+                f"SELL order invalid: TP1({tp1:.1f}) < Entry({price:.1f}) < SL({sl:.1f})"
             )
 
-    # Risk/Reward check (TP3)
-    sl_distance = abs(price - sl)
-    tp3_distance = abs(tp3 - price)
-    if sl_distance <= 0:
-        return False, "SL distance is zero"
-
-    rr = tp3_distance / sl_distance
-    if rr < settings.min_rr:
-        return False, f"RR too low: {rr:.2f} < {settings.min_rr}"
-
-    # Spread check
-    spread_pips = price_to_pips(spread)
-    if spread_pips > settings.spread_threshold_pips:
-        return False, f"Spread too wide: {spread_pips:.1f} pips"
-
-    # Confidence check (optional soft filter)
-    confidence = ai_output.get("confidence", 0)
-    if isinstance(confidence, (int, float)) and confidence < 30:
-        return False, f"Confidence too low: {confidence}"
-
-    logger.info(f"Signal validated: {decision} RR={rr:.2f} SL={sl_pips:.1f}pips")
+    logger.info(f"Signal validated: {decision} SL={sl_pips:.1f}pips")
     return True, None
 
 

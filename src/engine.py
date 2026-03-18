@@ -1,17 +1,17 @@
 """
-Signal Engine Orchestrator - Coordinates the full signal pipeline.
+Signal Engine Orchestrator - ChatGPT freely analyzes market and decides entries.
 
-Flow: Data → Features → Classify → Candidate → AI Judge → Risk Filter → Notify → Log
+Flow: Data → Features → AI (free analysis) → Risk Filter → Notify → Log
+No hardcoded entry conditions. AI has full autonomy.
 """
 import logging
+from datetime import datetime
 from typing import Dict, Optional
 
 from src.config.settings import Settings
 from src.data.receiver import MarketDataReceiver
 from src.features.engine import compute_all_features, get_latest_features
-from src.classifier.market_state import classify_all
-from src.signals.generator import generate_candidate
-from src.ai.judge import evaluate_candidate
+from src.ai.judge import analyze_market
 from src.risk.filter import validate_signal, enrich_signal
 from src.notifier.telegram import TelegramNotifier
 from src.storage.database import SignalDatabase
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class SignalEngine:
-    """Main orchestrator for the XAUUSD signal pipeline."""
+    """Main orchestrator - lets ChatGPT freely analyze XAUUSD."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -33,10 +33,9 @@ class SignalEngine:
         self._restore_open_positions()
 
     def process_webhook(self, payload: Dict) -> bool:
-        """Process a TradingView webhook and potentially trigger signal analysis."""
+        """Process a TradingView webhook and check positions."""
         success = self.receiver.process_webhook(payload)
 
-        # Check open positions against new price data
         if success and payload.get("timeframe", "").upper() == "M5":
             high = float(payload.get("high", 0))
             low = float(payload.get("low", 0))
@@ -48,22 +47,15 @@ class SignalEngine:
 
     def run_analysis(self) -> Optional[Dict]:
         """
-        Run the full signal pipeline. Returns the signal dict or None.
-        Should be called after enough data has been accumulated.
+        Run AI-driven analysis. ChatGPT freely decides BUY/SELL/NO_TRADE.
+        No hardcoded filters - AI sees raw market data and decides.
         """
         # Step 0: Check trading session
         jst_now = now_jst()
         if not self.settings.is_trading_session(jst_now.hour, jst_now.minute):
             session = self.settings.get_active_session(jst_now.hour, jst_now.minute)
-            logger.info(f"Outside trading session ({session}) - NO_TRADE")
-            no_trade = {
-                "symbol": "XAUUSD",
-                "decision": "NO_TRADE",
-                "reason": f"Outside trading session: {session}",
-                "confidence": 0,
-            }
-            self.db.save_signal(no_trade)
-            return no_trade
+            logger.info(f"Outside trading session ({session}) - skipping")
+            return None
 
         # Step 1: Get data
         data = self.receiver.get_all_dataframes()
@@ -71,94 +63,78 @@ class SignalEngine:
             logger.warning("Insufficient data for analysis")
             return None
 
-        current_price = self.receiver.get_current_price()
-        if current_price is None:
+        current_price_data = self.receiver.get_current_price()
+        if current_price_data is None:
             logger.warning("No current price available")
             return None
 
-        # Step 2: Compute features
+        current_price = current_price_data.get("bid", 0)
+        if current_price <= 0:
+            logger.warning("Invalid current price")
+            return None
+
+        # Step 2: Compute features (technical indicators)
         featured_data = compute_all_features(data)
         if featured_data is None:
             logger.error("Feature computation failed")
             return None
 
-        # Step 3: Classify market states
-        states = classify_all(featured_data)
-        if states is None:
-            logger.error("Market state classification failed")
+        # Step 3: Get context for AI
+        signals_today = self._count_signals_today()
+        recent_results = self._get_recent_results_summary()
+
+        # Step 4: Let ChatGPT freely analyze and decide
+        ai_output = analyze_market(
+            featured_data=featured_data,
+            current_price=current_price,
+            settings=self.settings,
+            signals_today=signals_today,
+            recent_results=recent_results,
+        )
+
+        if ai_output is None:
+            logger.error("AI analysis failed")
             return None
 
-        # Step 4: Generate signal candidate
-        candidate = generate_candidate(states, featured_data, current_price, self.settings)
-        if candidate is None:
-            no_trade = {
-                "symbol": "XAUUSD",
-                "decision": "NO_TRADE",
-                "reason": "No valid signal candidate",
-                "confidence": 0,
-            }
-            self.db.save_signal(no_trade, market_context=states)
-            logger.info("No signal candidate generated")
-            return no_trade
+        decision = ai_output.get("decision", "").upper()
 
-        # Step 5: AI evaluation
-        ai_output = evaluate_candidate(candidate, featured_data, self.settings)
-        if ai_output is None:
-            logger.error("AI evaluation failed")
-            no_trade = {
-                "symbol": "XAUUSD",
-                "decision": "NO_TRADE",
-                "reason": "AI evaluation failed",
-                "confidence": 0,
-            }
-            self.db.save_signal(no_trade, market_context=states)
-            return no_trade
+        # NO_TRADE - just log and return
+        if decision == "NO_TRADE":
+            self.db.save_signal(ai_output)
+            logger.info(f"AI decided NO_TRADE: {ai_output.get('reason', 'N/A')}")
+            return ai_output
 
-        # Step 6: Risk filter
-        spread = current_price.get("spread", 0)
+        # Step 5: Light risk filter (only validate numbers make sense)
+        spread = current_price_data.get("spread", 0)
         is_valid, rejection_reason = validate_signal(ai_output, self.settings, spread)
 
         if not is_valid:
             logger.warning(f"Signal rejected by risk filter: {rejection_reason}")
             ai_output["decision"] = "NO_TRADE"
             ai_output["reason"] = f"Risk filter: {rejection_reason}"
-            self.db.save_signal(
-                ai_output, market_context=states,
-                features=self._collect_features_snapshot(featured_data),
-            )
+            self.db.save_signal(ai_output)
             return ai_output
 
         # Enrich with computed fields
         ai_output = enrich_signal(ai_output)
 
-        # Step 7: Duplicate check
-        decision = ai_output.get("decision", "").upper()
+        # Step 6: Duplicate check
         price = float(ai_output.get("current_price", 0))
+        if self.db.is_duplicate(decision, price, self.settings.signal_cooldown_seconds):
+            logger.info("Duplicate signal - skipping notification")
+            self.db.save_signal(ai_output, notification_sent=False)
+            return ai_output
 
-        if decision in ("BUY", "SELL"):
-            if self.db.is_duplicate(decision, price, self.settings.signal_cooldown_seconds):
-                logger.info("Duplicate signal - skipping notification")
-                self.db.save_signal(
-                    ai_output, market_context=states,
-                    features=self._collect_features_snapshot(featured_data),
-                    notification_sent=False,
-                )
-                return ai_output
+        # Step 7: Telegram notification
+        notification_sent = self.notifier.send_signal(ai_output)
 
-        # Step 8: Telegram notification
-        notification_sent = False
-        if decision in ("BUY", "SELL"):
-            notification_sent = self.notifier.send_signal(ai_output)
-
-        # Step 9: Save to database
+        # Step 8: Save to database
         signal_id = self.db.save_signal(
-            ai_output, market_context=states,
-            features=self._collect_features_snapshot(featured_data),
-            notification_sent=notification_sent,
+            ai_output, notification_sent=notification_sent,
         )
 
-        # Step 10: Register position for tracking
-        if decision in ("BUY", "SELL") and signal_id:
+        # Step 9: Register position for tracking
+        if signal_id:
             self.tracker.open_position(signal_id, ai_output)
 
         logger.info(
@@ -166,6 +142,36 @@ class SignalEngine:
             f"(notified={notification_sent})"
         )
         return ai_output
+
+    def _count_signals_today(self) -> int:
+        """Count BUY/SELL signals sent today."""
+        try:
+            recent = self.db.get_recent_signals(50)
+            today = now_jst().date()
+            count = 0
+            for s in recent:
+                ts = s.get("timestamp", "")
+                decision = s.get("decision", "")
+                if decision in ("BUY", "SELL") and str(today) in str(ts):
+                    count += 1
+            return count
+        except Exception:
+            return 0
+
+    def _get_recent_results_summary(self) -> str:
+        """Get a brief summary of recent trade results for AI context."""
+        try:
+            stats = self.db.get_performance_stats()
+            if not stats or stats.get("total_trades", 0) == 0:
+                return "まだトレード実績なし"
+
+            win_rate = stats.get("win_rate", 0)
+            total = stats.get("total_trades", 0)
+            wins = stats.get("wins", 0)
+            losses = stats.get("losses", 0)
+            return f"勝率{win_rate}%（{wins}勝{losses}敗 / {total}トレード）"
+        except Exception:
+            return "取得エラー"
 
     def get_status(self) -> Dict:
         """Get engine status for health checks."""
@@ -175,6 +181,7 @@ class SignalEngine:
             "data_status": self.receiver.get_status(),
             "trading_session": self.settings.get_active_session(jst_now.hour, jst_now.minute),
             "time_jst": jst_now.isoformat(),
+            "signals_today": self._count_signals_today(),
             "recent_signals": len(self.db.get_recent_signals(5)),
         }
 
@@ -185,13 +192,11 @@ class SignalEngine:
             event_type = event["event_type"]
             signal_id = event["signal_id"]
 
-            # Update database
             self.db.update_trade_event(
                 signal_id, event_type,
                 event["exit_price"], event["pnl_pips"],
             )
 
-            # Send Telegram notification
             if event_type == "SL_HIT":
                 self.notifier.send_sl_hit(event)
             elif event_type in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
@@ -212,7 +217,6 @@ class SignalEngine:
                 "confidence": trade.get("confidence", 0),
             }
             self.tracker.open_position(signal_id, signal)
-            # Restore TP hit state
             pos = self.tracker._open_positions.get(signal_id)
             if pos:
                 pos["tp1_hit"] = bool(trade.get("tp1_hit"))
@@ -224,10 +228,3 @@ class SignalEngine:
     def get_performance(self) -> Dict:
         """Get trading performance statistics."""
         return self.db.get_performance_stats()
-
-    def _collect_features_snapshot(self, featured_data: Dict) -> Dict:
-        """Collect latest features from all timeframes for logging."""
-        snapshot = {}
-        for tf, df in featured_data.items():
-            snapshot[tf] = get_latest_features(df)
-        return snapshot
