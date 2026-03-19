@@ -104,9 +104,11 @@ def scheduled_analysis():
         except Exception as e:
             logger.error(f"Scheduled analysis error: {e}", exc_info=True)
 
-warmup_historical_data()
-
 app = Flask(__name__)
+
+# Run warmup in background so gunicorn can bind the port immediately
+warmup_thread = threading.Thread(target=warmup_historical_data, daemon=True)
+warmup_thread.start()
 
 
 @app.route("/webhook/tradingview", methods=["POST"])
