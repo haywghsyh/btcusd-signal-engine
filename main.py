@@ -44,6 +44,26 @@ def warmup_historical_data():
         logger.error(f"Historical data warmup failed: {e}", exc_info=True)
 
 
+def retry_missing_historical_data():
+    """Retry loading historical data for timeframes with insufficient candles."""
+    status = engine.receiver.get_status()
+    missing_tfs = [
+        tf for tf in settings.timeframes
+        if status.get(tf, 0) < settings.min_candles.get(tf, 50)
+    ]
+    if not missing_tfs:
+        return
+
+    logger.info(f"Retrying historical data for: {missing_tfs}")
+    try:
+        loaded = load_historical_data(engine.receiver, missing_tfs)
+        if loaded:
+            new_status = engine.receiver.get_status()
+            logger.info(f"Buffer status after retry: {new_status}")
+    except Exception as e:
+        logger.warning(f"Historical data retry failed: {e}")
+
+
 def scheduled_analysis():
     """
     Periodically run AI analysis.
@@ -54,6 +74,9 @@ def scheduled_analysis():
     while True:
         try:
             time.sleep(ANALYSIS_INTERVAL)
+
+            # Retry loading historical data for any timeframes still lacking data
+            retry_missing_historical_data()
 
             jst_now = now_jst()
             session = settings.get_active_session(jst_now.hour, jst_now.minute)
