@@ -225,8 +225,25 @@ class MarketDataReceiver:
         if timeframe not in self._buffers:
             return 0
         count = 0
+        last_candle = None
         for c in candles:
             self._buffers[timeframe].add(c)
+            last_candle = c
             count += 1
+
+        # Set current price from the latest candle if not yet available
+        if last_candle and count > 0:
+            with self._lock:
+                if self._current_price is None:
+                    close = last_candle.get("close", 0)
+                    if close > 0:
+                        self._current_price = {
+                            "bid": close,
+                            "ask": close + 0.3,
+                            "spread": 0.3,
+                            "time": last_candle.get("time"),
+                        }
+                        logger.info(f"Initial price set from historical data: {close:.1f}")
+
         logger.info(f"Loaded {count} historical candles for {timeframe}")
         return count
