@@ -1,10 +1,12 @@
 """
 XAUUSD Signal Engine - Main entry point.
-Runs a Flask webhook server that receives TradingView alerts
-and triggers the signal analysis pipeline.
+Runs a Flask webhook server with scheduled AI analysis.
+ChatGPT freely analyzes market data and decides entries (scalping style).
 """
 import logging
 import os
+import threading
+import time
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -15,6 +17,7 @@ from src.config.settings import Settings
 from src.data.historical import load_historical_data
 from src.engine import SignalEngine
 from src.utils.logger import setup_logger
+from src.utils.time_utils import now_jst
 
 # Initialize
 settings = Settings()
@@ -23,9 +26,12 @@ logger = logging.getLogger(__name__)
 
 engine = SignalEngine(settings)
 
-# Load historical data on startup (works with both direct run and gunicorn)
+# Analysis interval in seconds (default: 30 minutes)
+ANALYSIS_INTERVAL = int(os.getenv("ANALYSIS_INTERVAL_SECONDS", "300"))
+
+
 def warmup_historical_data():
-    """Load historical data on startup so signals can be generated immediately."""
+    """Load historical data on startup."""
     logger.info("Loading historical XAUUSD data...")
     try:
         loaded = load_historical_data(engine.receiver, settings.timeframes)
@@ -33,10 +39,41 @@ def warmup_historical_data():
             status = engine.receiver.get_status()
             logger.info(f"Buffer status after warmup: {status}")
         else:
-            logger.warning("Historical data warmup returned no data - signals will be delayed")
+            logger.warning("Historical data warmup returned no data")
     except Exception as e:
         logger.error(f"Historical data warmup failed: {e}", exc_info=True)
-        logger.warning("Continuing without historical data - signals will be delayed")
+
+
+def scheduled_analysis():
+    """
+    Periodically run AI analysis.
+    ChatGPT decides freely whether to enter or not.
+    Target: ~3 signals per day during trading sessions.
+    """
+    logger.info(f"Scheduled analysis started (interval: {ANALYSIS_INTERVAL}s)")
+    while True:
+        try:
+            time.sleep(ANALYSIS_INTERVAL)
+
+            jst_now = now_jst()
+            session = settings.get_active_session(jst_now.hour, jst_now.minute)
+
+            if session == "CLOSED":
+                logger.debug(f"Market closed at {jst_now.strftime('%H:%M')} JST - skipping")
+                continue
+
+            logger.info(f"Running scheduled analysis ({session} session, {jst_now.strftime('%H:%M')} JST)")
+            result = engine.run_analysis()
+
+            if result:
+                decision = result.get("decision", "NO_TRADE")
+                reason = result.get("reason", "N/A")
+                logger.info(f"Scheduled analysis result: {decision} - {reason}")
+            else:
+                logger.info("Scheduled analysis: no result (insufficient data)")
+
+        except Exception as e:
+            logger.error(f"Scheduled analysis error: {e}", exc_info=True)
 
 warmup_historical_data()
 
@@ -46,18 +83,8 @@ app = Flask(__name__)
 @app.route("/webhook/tradingview", methods=["POST"])
 def tradingview_webhook():
     """
-    Receive TradingView alert webhook.
-    Expected JSON payload:
-    {
-        "symbol": "XAUUSD",
-        "timestamp": "2025-01-01T00:00:00Z",
-        "open": 3030.0,
-        "high": 3035.0,
-        "low": 3028.0,
-        "close": 3033.0,
-        "volume": 1234,
-        "timeframe": "M5"
-    }
+    Receive TradingView alert webhook (for price data ingestion).
+    Analysis is handled by the scheduler, not triggered by webhooks.
     """
     try:
         payload = request.get_json(force=True, silent=True)
@@ -65,35 +92,12 @@ def tradingview_webhook():
             return jsonify({"error": "Invalid JSON"}), 400
 
         logger.info(f"Webhook received: {payload.get('timeframe', '?')} candle")
-        logger.debug(f"Webhook payload: {payload}")
 
-        # Process the candle data
         success = engine.process_webhook(payload)
         if not success:
             return jsonify({"status": "rejected", "reason": "Invalid payload"}), 400
 
-        # Run analysis after receiving data
-        result = engine.run_analysis()
-
-        if result is None:
-            return jsonify({"status": "ok", "signal": "insufficient_data"}), 200
-
-        decision = result.get("decision", "NO_TRADE")
-        response = {
-            "status": "ok",
-            "signal": decision,
-        }
-        if decision in ("BUY", "SELL"):
-            response.update({
-                "entry": result.get("current_price"),
-                "sl": result.get("sl"),
-                "tp1": result.get("tp1"),
-                "tp2": result.get("tp2"),
-                "tp3": result.get("tp3"),
-                "confidence": result.get("confidence"),
-            })
-
-        return jsonify(response), 200
+        return jsonify({"status": "ok", "message": "Data ingested"}), 200
 
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
@@ -102,17 +106,7 @@ def tradingview_webhook():
 
 @app.route("/webhook/batch", methods=["POST"])
 def batch_webhook():
-    """
-    Receive multiple candles at once (for initial data loading).
-    Expected JSON:
-    {
-        "timeframe": "H4",
-        "candles": [
-            {"timestamp": "...", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...},
-            ...
-        ]
-    }
-    """
+    """Receive multiple candles at once (for initial data loading)."""
     try:
         payload = request.get_json(force=True, silent=True)
         if payload is None:
@@ -163,7 +157,7 @@ def recent_signals():
 
 @app.route("/analyze", methods=["POST"])
 def manual_analyze():
-    """Manually trigger signal analysis."""
+    """Manually trigger AI analysis."""
     result = engine.run_analysis()
     if result is None:
         return jsonify({"status": "no_data", "message": "Insufficient data for analysis"}), 200
@@ -194,13 +188,17 @@ def send_performance_telegram():
     return jsonify({"status": "sent" if sent else "failed"}), 200
 
 
+# Start scheduled analysis in background thread
+analysis_thread = threading.Thread(target=scheduled_analysis, daemon=True)
+analysis_thread.start()
+
+
 if __name__ == "__main__":
-    logger.info("Starting XAUUSD Signal Engine...")
+    logger.info("Starting XAUUSD Signal Engine (AI Free Analysis Mode)...")
     logger.info(f"Symbol: {settings.symbol}")
     logger.info(f"AI Model: {settings.ai_model}")
-    logger.info(f"Webhook: http://{settings.webhook_host}:{settings.webhook_port}/webhook/tradingview")
+    logger.info(f"Analysis interval: {ANALYSIS_INTERVAL}s")
 
-    # Send startup notification
     engine.notifier.send_startup_message()
 
     app.run(
