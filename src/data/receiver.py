@@ -55,8 +55,10 @@ class MarketDataReceiver:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._buffers: Dict[str, CandleBuffer] = {}
+        # Buffer sizes: hold enough candles for indicators (EMA200 etc.)
+        buffer_sizes = {"H4": 500, "H1": 1500, "M15": 1500, "M5": 1500}
         for tf in settings.timeframes:
-            max_c = settings.min_candles.get(tf, 1500)
+            max_c = buffer_sizes.get(tf, 1500)
             self._buffers[tf] = CandleBuffer(max_candles=max_c)
         self._current_price: Optional[Dict] = None
         self._lock = threading.Lock()
