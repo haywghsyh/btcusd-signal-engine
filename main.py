@@ -85,7 +85,13 @@ def scheduled_analysis():
                 logger.debug(f"Market closed at {jst_now.strftime('%H:%M')} JST - skipping")
                 continue
 
-            logger.info(f"Running scheduled analysis ({session} session, {jst_now.strftime('%H:%M')} JST)")
+            buffer_status = engine.receiver.get_status()
+            price_available = engine.receiver.get_current_price() is not None
+            logger.info(
+                f"Running scheduled analysis ({session} session, "
+                f"{jst_now.strftime('%H:%M')} JST) "
+                f"buffers={buffer_status} price={'yes' if price_available else 'NO'}"
+            )
             result = engine.run_analysis()
 
             if result:
