@@ -84,8 +84,10 @@ class TelegramNotifier:
 
     def __init__(self, settings: Settings):
         self.token = settings.telegram_token
-        self.chat_id = settings.telegram_chat_id
-        self._enabled = bool(self.token and self.chat_id)
+        # Support comma-separated chat IDs for multiple recipients
+        raw_ids = settings.telegram_chat_id
+        self.chat_ids = [cid.strip() for cid in raw_ids.split(",") if cid.strip()] if raw_ids else []
+        self._enabled = bool(self.token and self.chat_ids)
         if not self._enabled:
             logger.warning("Telegram not configured - notifications disabled")
 
@@ -178,22 +180,23 @@ class TelegramNotifier:
 
     def _send_message(self, text: str) -> bool:
         url = f"{self.BASE_URL.format(token=self.token)}/sendMessage"
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-        }
-        try:
-            resp = requests.post(url, json=payload, timeout=10)
-            if resp.status_code == 200:
-                logger.info("Telegram message sent successfully")
-                return True
-            else:
-                logger.error(f"Telegram send failed: {resp.status_code} {resp.text}")
-                return False
-        except requests.RequestException as e:
-            logger.error(f"Telegram request error: {e}")
-            return False
+        success = False
+        for chat_id in self.chat_ids:
+            payload = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+            }
+            try:
+                resp = requests.post(url, json=payload, timeout=10)
+                if resp.status_code == 200:
+                    logger.info(f"Telegram message sent to {chat_id}")
+                    success = True
+                else:
+                    logger.error(f"Telegram send to {chat_id} failed: {resp.status_code} {resp.text}")
+            except requests.RequestException as e:
+                logger.error(f"Telegram request error for {chat_id}: {e}")
+        return success
 
     def send_startup_message(self) -> bool:
         return self.send_raw("🟢 XAUUSD Signal Engine started.")
