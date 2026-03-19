@@ -3,7 +3,7 @@ services:
     name: xauusd-signal-engine
     runtime: python
     buildCommand: pip install -r requirements-signal.txt
-    startCommand: gunicorn main:app --bind 0.0.0.0:$PORT --timeout 120
+    startCommand: gunicorn main:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1
     envVars:
       - key: OPENAI_API_KEY
         sync: false
@@ -17,5 +17,7 @@ services:
         value: gpt-4o-mini
       - key: LOG_LEVEL
         value: INFO
+      - key: WEB_CONCURRENCY
+        value: "1"
       - key: PYTHON_VERSION
         value: "3.11.0"
