@@ -149,21 +149,7 @@ def batch_webhook():
         if not timeframe or not candles:
             return jsonify({"error": "Missing timeframe or candles"}), 400
 
-        loaded = 0
-        for c in candles:
-            ts_raw = c.get("timestamp") or c.get("time")
-            ts = engine.receiver._parse_timestamp(ts_raw)
-
-            candle = {
-                "time": ts,
-                "open": float(c["open"]),
-                "high": float(c["high"]),
-                "low": float(c["low"]),
-                "close": float(c["close"]),
-                "volume": float(c.get("volume", 0)),
-            }
-            engine.receiver._buffers[timeframe].add(candle)
-            loaded += 1
+        loaded = engine.receiver.add_batch_candles(timeframe, candles)
 
         return jsonify({"status": "ok", "loaded": loaded, "timeframe": timeframe}), 200
 
