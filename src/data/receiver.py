@@ -100,7 +100,9 @@ class MarketDataReceiver:
         """
         try:
             symbol = payload.get("symbol", "").upper()
-            if symbol != self.settings.symbol:
+            # Accept both BTCUSD and BTCUSDT (TradingView often sends BTCUSDT)
+            expected = self.settings.symbol.upper()
+            if symbol != expected and symbol != expected + "T":
                 logger.warning(f"Ignoring symbol: {symbol}")
                 return False
 
