@@ -43,8 +43,8 @@ class Settings:
     min_rr: float = 0.5
     spread_threshold_pips: float = 50.0
 
-    # Cooldown (shorter for scalping)
-    signal_cooldown_seconds: int = 600
+    # Cooldown between same-direction signals (default: 30 min)
+    signal_cooldown_seconds: int = 1800
 
     # Sessions (BTC trades 24/7 - cover all hours)
     session_times: List[SessionTime] = field(default_factory=lambda: [

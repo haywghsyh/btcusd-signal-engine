@@ -1,9 +1,11 @@
 """
 Market Data Receiver - Stores OHLCV candle data received from TradingView webhooks.
 Maintains in-memory candle buffers per timeframe.
+Fetches real-time BTC price from yfinance when no webhook data is available.
 """
 import logging
 import threading
+import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -13,6 +15,33 @@ import pandas as pd
 from src.config.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_realtime_btc_price() -> Optional[Dict]:
+    """Fetch current BTC price from yfinance real-time data."""
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker("BTC-USD")
+        info = ticker.fast_info
+        price = getattr(info, "last_price", None)
+        if price is None or price <= 0:
+            # Fallback: get latest close from recent history
+            hist = ticker.history(period="1d", interval="1m")
+            if hist is not None and not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+            else:
+                return None
+        price = float(price)
+        spread = 10.0  # estimated
+        return {
+            "bid": price,
+            "ask": price + spread,
+            "spread": spread,
+            "time": datetime.now(timezone.utc),
+        }
+    except Exception as e:
+        logger.warning(f"Failed to fetch real-time BTC price: {e}")
+        return None
 
 
 class CandleBuffer:
@@ -213,6 +242,29 @@ class MarketDataReceiver:
         return result
 
     def get_current_price(self) -> Optional[Dict]:
+        """Get current price data. Fetches real-time price if stale (>2 min old)."""
+        with self._lock:
+            if self._current_price is not None:
+                price_time = self._current_price.get("time")
+                if price_time is not None:
+                    now = datetime.now(timezone.utc)
+                    if hasattr(price_time, 'timestamp'):
+                        age_seconds = (now - price_time).total_seconds()
+                    else:
+                        age_seconds = 999
+                    if age_seconds < 120:
+                        return self._current_price
+
+        # Price is stale or missing - fetch real-time
+        logger.info("Current price is stale, fetching real-time BTC price...")
+        realtime = _fetch_realtime_btc_price()
+        if realtime is not None:
+            with self._lock:
+                self._current_price = realtime
+            logger.info(f"Real-time BTC price updated: {realtime['bid']:.1f}")
+            return realtime
+
+        # Return stale price as fallback
         with self._lock:
             return self._current_price
 
