@@ -322,12 +322,17 @@ class SignalDatabase:
             # Time check
             elapsed = (now - last_time).total_seconds()
             if elapsed < cooldown_seconds:
-                # Price proximity check (within 2 pips = 0.2 USD)
+                # Price proximity check: within 0.5% of last price
                 last_price = last.get("entry_price", 0) or 0
-                if abs(price - last_price) < 2.0:
+                if last_price > 0:
+                    pct_diff = abs(price - last_price) / last_price * 100
+                else:
+                    pct_diff = 0
+                if pct_diff < 0.5:
                     logger.info(
                         f"Duplicate signal detected: {direction} at {price:.1f} "
-                        f"(last: {last_price:.1f}, {elapsed:.0f}s ago)"
+                        f"(last: {last_price:.1f}, {elapsed:.0f}s ago, "
+                        f"diff: {pct_diff:.2f}%)"
                     )
                     return True
 
