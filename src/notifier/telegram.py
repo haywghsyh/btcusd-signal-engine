@@ -10,7 +10,7 @@ from src.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-SIGNAL_TEMPLATE = """🔔 【XAUUSD SIGNAL】
+SIGNAL_TEMPLATE = """🔔 【BTCUSD SIGNAL】
 
 📊 Direction: {decision}
 💰 Entry: MARKET
@@ -44,7 +44,7 @@ SL_HIT_TEMPLATE = """❌ 【SL HIT】
 
 {tp_status}"""
 
-DASHBOARD_TEMPLATE = """📊 【XAUUSD 成績レポート】
+DASHBOARD_TEMPLATE = """📊 【BTCUSD 成績レポート】
 
 🏆 勝率: {win_rate}% ({wins}W / {losses}L)
 📈 合計: {total_pnl_pips:+.1f} pips ({total_trades}トレード)
@@ -199,7 +199,7 @@ class TelegramNotifier:
         return success
 
     def send_startup_message(self) -> bool:
-        return self.send_raw("🟢 XAUUSD Signal Engine started.")
+        return self.send_raw("🟢 BTCUSD Signal Engine started.")
 
     def send_error(self, error_msg: str) -> bool:
         return self.send_raw(f"🔴 Signal Engine Error:\n{error_msg}")

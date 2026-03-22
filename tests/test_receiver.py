@@ -41,12 +41,12 @@ class TestMarketDataReceiver:
     def test_process_valid_webhook(self, settings):
         receiver = MarketDataReceiver(settings)
         payload = {
-            "symbol": "XAUUSD",
+            "symbol": "BTCUSD",
             "timestamp": "2025-01-01T00:00:00Z",
-            "open": 3030.0,
-            "high": 3035.0,
-            "low": 3028.0,
-            "close": 3033.0,
+            "open": 85000.0,
+            "high": 85200.0,
+            "low": 84800.0,
+            "close": 85100.0,
             "volume": 100,
             "timeframe": "M5",
         }
@@ -65,9 +65,9 @@ class TestMarketDataReceiver:
     def test_reject_wrong_timeframe(self, settings):
         receiver = MarketDataReceiver(settings)
         payload = {
-            "symbol": "XAUUSD",
+            "symbol": "BTCUSD",
             "timestamp": "2025-01-01T00:00:00Z",
-            "open": 3030.0, "high": 3035.0, "low": 3028.0, "close": 3033.0,
+            "open": 85000.0, "high": 85200.0, "low": 84800.0, "close": 85100.0,
             "volume": 100, "timeframe": "D1",
         }
         assert receiver.process_webhook(payload) is False
@@ -75,15 +75,15 @@ class TestMarketDataReceiver:
     def test_current_price_after_webhook(self, settings):
         receiver = MarketDataReceiver(settings)
         payload = {
-            "symbol": "XAUUSD",
+            "symbol": "BTCUSD",
             "timestamp": "2025-01-01T00:00:00Z",
-            "open": 3030.0, "high": 3035.0, "low": 3028.0, "close": 3033.0,
+            "open": 85000.0, "high": 85200.0, "low": 84800.0, "close": 85100.0,
             "volume": 100, "timeframe": "M5",
         }
         receiver.process_webhook(payload)
         price = receiver.get_current_price()
         assert price is not None
-        assert price["bid"] == 3033.0
+        assert price["bid"] == 85100.0
 
     def test_get_status(self, settings):
         receiver = MarketDataReceiver(settings)

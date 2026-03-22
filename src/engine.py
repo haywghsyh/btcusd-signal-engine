@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class SignalEngine:
-    """Main orchestrator - lets ChatGPT freely analyze XAUUSD."""
+    """Main orchestrator - lets ChatGPT freely analyze BTCUSD."""
 
     def __init__(self, settings: Settings):
         self.settings = settings

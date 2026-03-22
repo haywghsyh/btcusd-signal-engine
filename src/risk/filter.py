@@ -45,10 +45,10 @@ def validate_signal(ai_output: Dict, settings: Settings,
         if val != val or val == float("inf") or val == float("-inf"):
             return False, f"Invalid value for {name}: {val}"
 
-    # SL width check (relaxed for scalping: max 50 pips)
+    # SL width check (relaxed for BTC scalping: max 500 pips)
     sl_pips = price_to_pips(price - sl)
-    if sl_pips > 50:
-        return False, f"SL too wide for scalping: {sl_pips:.1f} pips > 50 max"
+    if sl_pips > 500:
+        return False, f"SL too wide for scalping: {sl_pips:.1f} pips > 500 max"
 
     if sl_pips < 0.5:
         return False, f"SL too tight: {sl_pips:.1f} pips"

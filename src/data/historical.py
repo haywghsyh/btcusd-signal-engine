@@ -1,6 +1,6 @@
 """
-Historical Data Loader - Fetches past XAUUSD OHLCV data on startup.
-Uses yfinance (Gold Futures GC=F) to warm up candle buffers so signals
+Historical Data Loader - Fetches past BTCUSD OHLCV data on startup.
+Uses yfinance (BTC-USD) to warm up candle buffers so signals
 can be generated immediately without waiting hours for data accumulation.
 """
 import logging
@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class HistoricalDataLoader:
-    """Fetches historical XAUUSD data via yfinance on startup."""
+    """Fetches historical BTCUSD data via yfinance on startup."""
 
-    # yfinance ticker for Gold Futures (closely tracks XAUUSD)
-    TICKER = "GC=F"
+    # yfinance ticker for Bitcoin (BTCUSD)
+    TICKER = "BTC-USD"
 
     # How much history to fetch per timeframe
     FETCH_CONFIG = {

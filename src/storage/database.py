@@ -108,7 +108,7 @@ class SignalDatabase:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     signal_id, now,
-                    signal.get("symbol", "XAUUSD"),
+                    signal.get("symbol", "BTCUSD"),
                     signal.get("decision", "UNKNOWN"),
                     signal.get("current_price"),
                     signal.get("sl"),

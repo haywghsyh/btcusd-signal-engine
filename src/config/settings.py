@@ -1,5 +1,5 @@
 """
-XAUUSD Signal Engine - Configuration Settings
+BTCUSD Signal Engine - Configuration Settings
 All values can be overridden via environment variables.
 """
 import os
@@ -27,7 +27,7 @@ class SessionTime:
 
 @dataclass
 class Settings:
-    symbol: str = "XAUUSD"
+    symbol: str = "BTCUSD"
     timeframes: List[str] = field(default_factory=lambda: ["H4", "H1", "M15", "M5"])
 
     min_candles: Dict[str, int] = field(default_factory=lambda: {
@@ -39,18 +39,18 @@ class Settings:
     openai_api_key: str = ""
 
     # Risk (relaxed - AI decides freely, only sanity checks)
-    max_sl_pips: float = 50.0
+    max_sl_pips: float = 500.0
     min_rr: float = 0.5
-    spread_threshold_pips: float = 10.0
+    spread_threshold_pips: float = 50.0
 
     # Cooldown (shorter for scalping)
     signal_cooldown_seconds: int = 600
 
-    # Sessions (JST)
+    # Sessions (BTC trades 24/7 - cover all hours)
     session_times: List[SessionTime] = field(default_factory=lambda: [
-        SessionTime("Tokyo", 9, 0, 15, 0),
-        SessionTime("London", 16, 0, 21, 0),
-        SessionTime("NewYork", 21, 0, 2, 0),
+        SessionTime("Asia", 0, 0, 8, 0),
+        SessionTime("London", 8, 0, 16, 0),
+        SessionTime("NewYork", 16, 0, 24, 0),
     ])
 
     # Telegram
@@ -106,13 +106,13 @@ class Settings:
         return "CLOSED"
 
 
-# XAUUSD: 1 pip = 0.10 USD
-XAUUSD_PIP_SIZE = 0.10
+# BTCUSD: 1 pip = 1.0 USD
+BTCUSD_PIP_SIZE = 1.0
 
 
 def price_to_pips(price_diff: float) -> float:
-    return abs(price_diff) / XAUUSD_PIP_SIZE
+    return abs(price_diff) / BTCUSD_PIP_SIZE
 
 
 def pips_to_price(pips: float) -> float:
-    return pips * XAUUSD_PIP_SIZE
+    return pips * BTCUSD_PIP_SIZE

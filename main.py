@@ -1,5 +1,5 @@
 """
-XAUUSD Signal Engine - Main entry point.
+BTCUSD Signal Engine - Main entry point.
 Runs a Flask webhook server with scheduled AI analysis.
 ChatGPT freely analyzes market data and decides entries (scalping style).
 """
@@ -32,7 +32,7 @@ ANALYSIS_INTERVAL = int(os.getenv("ANALYSIS_INTERVAL_SECONDS", "300"))
 
 def warmup_historical_data():
     """Load historical data on startup."""
-    logger.info("Loading historical XAUUSD data...")
+    logger.info("Loading historical BTCUSD data...")
     try:
         loaded = load_historical_data(engine.receiver, settings.timeframes)
         if loaded:
@@ -225,7 +225,7 @@ analysis_thread.start()
 
 
 if __name__ == "__main__":
-    logger.info("Starting XAUUSD Signal Engine (AI Free Analysis Mode)...")
+    logger.info("Starting BTCUSD Signal Engine (AI Free Analysis Mode)...")
     logger.info(f"Symbol: {settings.symbol}")
     logger.info(f"AI Model: {settings.ai_model}")
     logger.info(f"Analysis interval: {ANALYSIS_INTERVAL}s")

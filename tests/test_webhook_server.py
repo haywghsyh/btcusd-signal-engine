@@ -18,16 +18,16 @@ class TestWebhookEndpoints:
         assert resp.status_code == 200
         data = resp.get_json()
         assert "symbol" in data
-        assert data["symbol"] == "XAUUSD"
+        assert data["symbol"] == "BTCUSD"
 
     def test_tradingview_webhook(self, client):
         payload = {
-            "symbol": "XAUUSD",
+            "symbol": "BTCUSD",
             "timestamp": "2025-01-01T10:00:00Z",
-            "open": 3030.0,
-            "high": 3035.0,
-            "low": 3028.0,
-            "close": 3033.0,
+            "open": 85000.0,
+            "high": 85200.0,
+            "low": 84800.0,
+            "close": 85100.0,
             "volume": 100,
             "timeframe": "M5",
         }
@@ -57,8 +57,8 @@ class TestWebhookEndpoints:
         payload = {
             "timeframe": "H1",
             "candles": [
-                {"timestamp": "2025-01-01T00:00:00Z", "open": 3030, "high": 3035, "low": 3028, "close": 3033, "volume": 100},
-                {"timestamp": "2025-01-01T01:00:00Z", "open": 3033, "high": 3038, "low": 3030, "close": 3036, "volume": 150},
+                {"timestamp": "2025-01-01T00:00:00Z", "open": 85000, "high": 85200, "low": 84800, "close": 85100, "volume": 100},
+                {"timestamp": "2025-01-01T01:00:00Z", "open": 85100, "high": 85300, "low": 85000, "close": 85200, "volume": 150},
             ],
         }
         resp = client.post(

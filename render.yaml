@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: xauusd-signal-engine
+    name: btcusd-signal-engine
     runtime: python
     buildCommand: pip install -r requirements-signal.txt
     startCommand: gunicorn main:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1

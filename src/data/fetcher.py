@@ -1,5 +1,5 @@
 """
-Market Data Fetcher - Retrieves OHLCV + Bid/Ask/Spread data for XAUUSD.
+Market Data Fetcher - Retrieves OHLCV + Bid/Ask/Spread data for BTCUSD.
 Supports MetaTrader5 and a demo/random data provider for testing.
 """
 import logging

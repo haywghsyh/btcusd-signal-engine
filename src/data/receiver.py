@@ -108,8 +108,8 @@ class MarketDataReceiver:
             with self._lock:
                 self._current_price = {
                     "bid": candle["close"],
-                    "ask": candle["close"] + 0.3,  # estimated spread
-                    "spread": 0.3,
+                    "ask": candle["close"] + 10.0,  # estimated spread
+                    "spread": 10.0,
                     "time": ts,
                 }
 
@@ -239,8 +239,8 @@ class MarketDataReceiver:
                     if close > 0:
                         self._current_price = {
                             "bid": close,
-                            "ask": close + 0.3,
-                            "spread": 0.3,
+                            "ask": close + 10.0,
+                            "spread": 10.0,
                             "time": last_candle.get("time"),
                         }
                         logger.info(f"Initial price set from historical data: {close:.1f}")

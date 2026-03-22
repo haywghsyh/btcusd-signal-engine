@@ -147,9 +147,9 @@ class PositionTracker:
         return len(self._open_positions)
 
     def _calc_pnl(self, pos: Dict, exit_price: float) -> float:
-        """Calculate PnL in pips. XAUUSD: 1 pip = $0.10"""
+        """Calculate PnL in pips. BTCUSD: 1 pip = $1.0"""
         entry = pos["entry_price"]
         if pos["direction"] == "BUY":
-            return (exit_price - entry) / 0.10
+            return (exit_price - entry) / 1.0
         else:
-            return (entry - exit_price) / 0.10
+            return (entry - exit_price) / 1.0
