@@ -220,6 +220,30 @@ class MarketDataReceiver:
         """Return buffer sizes per timeframe."""
         return {tf: buf.count() for tf, buf in self._buffers.items()}
 
+    def add_batch_candles(self, timeframe: str, raw_candles: List[Dict]) -> int:
+        """
+        Add multiple raw candles (from batch webhook).
+        Parses timestamps and converts values. Returns count loaded.
+        """
+        if timeframe not in self._buffers:
+            return 0
+        count = 0
+        for c in raw_candles:
+            ts_raw = c.get("timestamp") or c.get("time")
+            ts = self._parse_timestamp(ts_raw)
+            candle = {
+                "time": ts,
+                "open": float(c["open"]),
+                "high": float(c["high"]),
+                "low": float(c["low"]),
+                "close": float(c["close"]),
+                "volume": float(c.get("volume", 0)),
+            }
+            self._buffers[timeframe].add(candle)
+            count += 1
+        logger.info(f"Batch loaded {count} candles for {timeframe}")
+        return count
+
     def load_initial_data(self, timeframe: str, candles: List[Dict]) -> int:
         """Bulk load historical candles (e.g. from CSV or API). Returns count loaded."""
         if timeframe not in self._buffers:

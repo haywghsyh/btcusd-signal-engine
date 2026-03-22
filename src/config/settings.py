@@ -64,6 +64,9 @@ class Settings:
     log_level: str = "INFO"
     log_file: str = "signal_engine.log"
 
+    # Data provider ("demo" or "mt5")
+    data_provider: str = "demo"
+
     # Webhook server
     webhook_host: str = "0.0.0.0"
     webhook_port: int = 8080
@@ -77,6 +80,7 @@ class Settings:
             "LOG_LEVEL": "log_level",
             "AI_MODEL": "ai_model",
             "WEBHOOK_HOST": "webhook_host",
+            "DATA_PROVIDER": "data_provider",
         }
         for env_key, attr in env_map.items():
             val = os.getenv(env_key)

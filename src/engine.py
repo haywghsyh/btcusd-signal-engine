@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 from src.config.settings import Settings
 from src.data.receiver import MarketDataReceiver
-from src.features.engine import compute_all_features, get_latest_features
+from src.features.engine import compute_all_features
 from src.ai.judge import analyze_market
 from src.risk.filter import validate_signal, enrich_signal
 from src.notifier.telegram import TelegramNotifier
