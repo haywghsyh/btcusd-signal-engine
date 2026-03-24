@@ -49,10 +49,10 @@ def validate_signal(ai_output: Dict, settings: Settings,
     if spread > settings.spread_threshold_pips:
         return False, f"Spread too wide: {spread:.1f} > {settings.spread_threshold_pips:.1f} pips"
 
-    # SL width check (max 1000 pips for BTC short-term trading)
+    # SL width check (max 2000 pips - only reject clearly invalid values)
     sl_pips = price_to_pips(price - sl)
-    if sl_pips > 1000:
-        return False, f"SL too wide: {sl_pips:.1f} pips > 1000 max"
+    if sl_pips > 2000:
+        return False, f"SL too wide: {sl_pips:.1f} pips > 2000 max"
 
     if sl_pips < 0.5:
         return False, f"SL too tight: {sl_pips:.1f} pips"
