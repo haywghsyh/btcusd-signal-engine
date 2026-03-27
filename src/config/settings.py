@@ -71,6 +71,12 @@ class Settings:
     webhook_host: str = "0.0.0.0"
     webhook_port: int = 8080
 
+    # X (Twitter) scraping
+    x_scraping_enabled: bool = True
+    x_scraping_accounts: str = ""  # Comma-separated, empty = use defaults
+    x_scraping_cache_ttl: int = 300  # seconds
+    x_scraping_request_timeout: int = 15
+
     def __post_init__(self):
         env_map = {
             "TELEGRAM_TOKEN": "telegram_token",
@@ -94,7 +100,24 @@ class Settings:
             if val:
                 setattr(self, attr, float(val))
 
-        int_env = {"WEBHOOK_PORT": "webhook_port", "SIGNAL_COOLDOWN": "signal_cooldown_seconds"}
+        bool_env = {"X_SCRAPING_ENABLED": "x_scraping_enabled"}
+        for env_key, attr in bool_env.items():
+            val = os.getenv(env_key)
+            if val is not None:
+                setattr(self, attr, val.lower() in ("true", "1", "yes"))
+
+        str_env_extra = {"X_SCRAPING_ACCOUNTS": "x_scraping_accounts"}
+        for env_key, attr in str_env_extra.items():
+            val = os.getenv(env_key)
+            if val:
+                setattr(self, attr, val)
+
+        int_env = {
+            "WEBHOOK_PORT": "webhook_port",
+            "SIGNAL_COOLDOWN": "signal_cooldown_seconds",
+            "X_SCRAPING_CACHE_TTL": "x_scraping_cache_ttl",
+            "X_SCRAPING_REQUEST_TIMEOUT": "x_scraping_request_timeout",
+        }
         for env_key, attr in int_env.items():
             val = os.getenv(env_key)
             if val:

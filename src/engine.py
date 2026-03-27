@@ -10,6 +10,7 @@ from typing import Dict, Optional
 
 from src.config.settings import Settings
 from src.data.receiver import MarketDataReceiver
+from src.data.x_scraper import XScraper
 from src.features.engine import compute_all_features
 from src.ai.judge import analyze_market
 from src.risk.filter import validate_signal, enrich_signal
@@ -30,6 +31,7 @@ class SignalEngine:
         self.notifier = TelegramNotifier(settings)
         self.db = SignalDatabase(settings)
         self.tracker = PositionTracker()
+        self.x_scraper = self._init_x_scraper(settings)
         self._restore_open_positions()
 
     def process_webhook(self, payload: Dict) -> bool:
@@ -83,6 +85,9 @@ class SignalEngine:
         signals_today = self._count_signals_today()
         recent_results = self._get_recent_results_summary()
 
+        # Step 3.5: Get X (Twitter) sentiment
+        x_sentiment = self._get_x_sentiment()
+
         # Step 4: Let ChatGPT freely analyze and decide
         ai_output = analyze_market(
             featured_data=featured_data,
@@ -90,6 +95,7 @@ class SignalEngine:
             settings=self.settings,
             signals_today=signals_today,
             recent_results=recent_results,
+            x_sentiment=x_sentiment,
         )
 
         if ai_output is None:
@@ -173,10 +179,46 @@ class SignalEngine:
         except Exception:
             return "取得エラー"
 
+    @staticmethod
+    def _init_x_scraper(settings: Settings) -> Optional[XScraper]:
+        """Initialize X scraper if enabled."""
+        if not settings.x_scraping_enabled:
+            logger.info("X scraping disabled")
+            return None
+
+        accounts = None
+        if settings.x_scraping_accounts:
+            accounts = [
+                a.strip() for a in settings.x_scraping_accounts.split(",") if a.strip()
+            ]
+
+        scraper = XScraper(
+            accounts=accounts,
+            cache_ttl_seconds=settings.x_scraping_cache_ttl,
+            request_timeout=settings.x_scraping_request_timeout,
+        )
+        logger.info(
+            f"X scraper initialized (accounts={len(scraper.accounts)}, "
+            f"cache_ttl={settings.x_scraping_cache_ttl}s)"
+        )
+        return scraper
+
+    def _get_x_sentiment(self) -> str:
+        """Get X sentiment summary for AI prompt."""
+        if self.x_scraper is None:
+            return "X（Twitter）スクレイピング無効"
+
+        try:
+            summary = self.x_scraper.get_sentiment()
+            return summary.to_ai_summary()
+        except Exception as e:
+            logger.warning(f"X sentiment collection failed: {e}")
+            return "X（Twitter）データ取得失敗"
+
     def get_status(self) -> Dict:
         """Get engine status for health checks."""
         jst_now = now_jst()
-        return {
+        status = {
             "symbol": self.settings.symbol,
             "data_status": self.receiver.get_status(),
             "trading_session": self.settings.get_active_session(jst_now.hour, jst_now.minute),
@@ -184,6 +226,9 @@ class SignalEngine:
             "signals_today": self._count_signals_today(),
             "recent_signals": len(self.db.get_recent_signals(5)),
         }
+        if self.x_scraper:
+            status["x_scraper"] = self.x_scraper.get_status()
+        return status
 
     def _check_positions(self, high: float, low: float, close: float):
         """Check open positions against price and send notifications."""

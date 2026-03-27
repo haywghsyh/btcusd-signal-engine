@@ -188,6 +188,31 @@ def open_positions():
     return jsonify({"open_positions": positions, "count": len(positions)}), 200
 
 
+@app.route("/x/sentiment", methods=["GET"])
+def x_sentiment():
+    """Get current X (Twitter) BTC sentiment."""
+    if engine.x_scraper is None:
+        return jsonify({"status": "disabled", "message": "X scraping is disabled"}), 200
+
+    force = request.args.get("force", "false").lower() == "true"
+    summary = engine.x_scraper.get_sentiment(force_refresh=force)
+    return jsonify({
+        "status": "ok",
+        "sentiment": summary.sentiment_label,
+        "score": summary.avg_sentiment_score,
+        "total_posts": summary.total_posts,
+        "bullish": summary.bullish_count,
+        "bearish": summary.bearish_count,
+        "neutral": summary.neutral_count,
+        "whale_alerts": summary.whale_alerts[:5],
+        "top_posts": [
+            {"user": p.username, "text": p.text[:200], "engagement": p.engagement}
+            for p in summary.top_posts[:5]
+        ],
+        "scraper_status": engine.x_scraper.get_status(),
+    }), 200
+
+
 @app.route("/performance", methods=["GET"])
 def performance():
     """Get trading performance stats."""
